@@ -51,6 +51,7 @@ X = adata.X
 print("Creating dataframe of cell and genes...")
 
 if issparse(X):
+    print("is sparse")
     X = X.tocoo()  # formato coordenado: más fácil para reconstruir
     df = pl.DataFrame({
         "CELL": [cells[i] for i in X.row],
@@ -58,6 +59,7 @@ if issparse(X):
         "count": X.data
     })
 else:
+    print("is not sparse")
     # Si no es sparse (denso)
     df = pl.DataFrame({
         "GEN": np.repeat(genes, len(cells)),
