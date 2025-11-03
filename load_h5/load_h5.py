@@ -7,7 +7,7 @@ import numpy as np
 from scipy.sparse import issparse
 
 current_path = Path(__file__).parent
-data_folder = (current_path.parent / 'data' / 'adata_Training.h5ad').resolve()
+data_folder = (current_path.parent / 'data' / 'raw_data' / 'adata_Training.h5ad').resolve()
 # data_folder = os.path.abspath(data_folder)
 
 print(f"loading data from {data_folder}")
