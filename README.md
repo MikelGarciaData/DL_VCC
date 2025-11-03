@@ -5,3 +5,6 @@ Deep Learning Virtual Cell Challenge
 
 raw data should be put here:
 [raw data](data/raw_data/)
+
+a viewer for the h5 file can be found here:
+[viewer](https://myhdf5.hdfgroup.org/)
