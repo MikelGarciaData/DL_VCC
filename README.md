@@ -36,7 +36,7 @@ Learning stuff:
 
 [flow matching 1](https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf)
 
-[flow matching 2]([https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf](https://www.youtube.com/watch?v=7NNxK3CqaDk))
+[flow matching 2]([https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf](https://www.youtube.com/watch?v=7NNxK3CqaDk)
 
 
 [Flow matching for single cell data (Marginal flow matching - maybe use this model)](https://youtu.be/I6zCSrs60eA?si=8xoLRO9o8wIlpBDg)
