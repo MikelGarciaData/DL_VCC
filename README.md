@@ -42,7 +42,6 @@ Learning stuff:
 [Flow matching for single cell data (Marginal flow matching - maybe use this model)](https://youtu.be/I6zCSrs60eA?si=8xoLRO9o8wIlpBDg)
 
 You can read more about the SE model in this paper: 
-https://github.com/MikelGarciaData/DL_VCC/blob/main/docs/2025.06.26.661135v2.full.pdf
-
+https://github.com/MikelGarciaData/DL_VCC/blob/main/docs/state_paper.pdf
 
 
