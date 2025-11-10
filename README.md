@@ -9,7 +9,7 @@ raw data should be put here:
 a viewer for the h5 file can be found here:
 [viewer](https://myhdf5.hdfgroup.org/)
 
-We are gonna use the cell embedding model from the STATE paper (SE) to embed the gene counts data into a latent space. The model can be found here:
+We are gonna use the cell embedding model from the STATE paper (named SE model) to embed the gene counts data into a latent space. The model can be found here:
 https://huggingface.co/arcinstitute/SE-600M
 
 Then we will use flow matching diffusion model for training. It will train on the embedded data and will train to predict how the cell state changes, from control cells (target_gene = "non-targeting") to pertubed state (the genes with a target gene)
@@ -28,9 +28,18 @@ Once the flow model learns to change the state of the cell, we will validate it 
 
 Learning stuff: 
 
-https://youtu.be/iv-5mZ_9CPY?si=yb6IEbxzJG7K6-al
+[what diffusion models are](https://youtu.be/iv-5mZ_9CPY?si=yb6IEbxzJG7K6-al)
 
-what diffusion models are
+
+[flow matching 1](https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf)
+
+[flow matching 2]([https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf](https://www.youtube.com/watch?v=7NNxK3CqaDk))
+
+
+[Flow matching for single cell data (Marginal flow matching - maybe use this model)](https://youtu.be/I6zCSrs60eA?si=8xoLRO9o8wIlpBDg)
+
+You can read more about the SE model in this paper: 
+https://github.com/MikelGarciaData/DL_VCC/blob/main/docs/2025.06.26.661135v2.full.pdf
 
 
 
