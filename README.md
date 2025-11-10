@@ -14,6 +14,9 @@ https://huggingface.co/arcinstitute/SE-600M
 
 Then we will use flow matching diffusion model for training. It will train on the embedded data and will train to predict how the cell state changes, from control cells (target_gene = "non-targeting") to pertubed state (the genes with a target gene)
 
+<img width="2402" height="882" alt="image" src="https://github.com/user-attachments/assets/363caaf8-58b2-4ffa-9a05-e2d0fbeaa545" />
+
+
 <img width="1280" height="306" alt="image" src="https://github.com/user-attachments/assets/b4f967fb-9cfa-41f8-8755-ba0b36cb508b" />
 
 The white are the control cells and C1 C2 are the perturbed states.
