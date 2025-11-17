@@ -1,2 +1,5 @@
 data/
 *.DS_Store
+.github/
+EDA/eda_diffusionmodel/tmp_input.h5ad
+EDA/eda_diffusionmodel/eda_diff_model.ipynb
