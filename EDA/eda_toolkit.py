@@ -1,6 +1,7 @@
 import anndata as ad
 import pandas as pd
 import numpy as np
+import scanpy as sc
 
 def create_subset_h5ad(
     input_path: str,
@@ -122,4 +123,52 @@ def create_subset_h5ad_by_size(
     adata.write_h5ad(output_path)
     print(f"Subset saved to {output_path}.")
 
+    return adata
+
+
+# Normalize and preprocess
+def norm_log_pca(adata, copy=False):
+    """
+    Preprocess an AnnData object by applying normalization, log-transformation,
+    highly variable gene selection, PCA, and neighbor graph construction,
+    using Scanpy's default parameters.
+
+    Parameters
+    ----------
+    adata : AnnData
+        AnnData object containing the expression matrix.
+    copy : bool, optional
+        If True, returns a copy of the object instead of modifying it in place.
+
+    Returns
+    -------
+    AnnData
+        Processed object with:
+        - Total-count normalization and log1p transformation
+        - Highly variable genes (.var['highly_variable'])
+        - PCA results (.obsm['X_pca'])
+        - Neighbor graph (.uns['neighbors'])
+    """
+
+    if copy:
+        adata = adata.copy()
+
+    # 1 Normalize total counts (keeps mean count per cell constant)
+    sc.pp.normalize_total(adata)
+
+    # 2 Logarithmic transformation
+    sc.pp.log1p(adata)
+
+    # 3 Select highly variable genes (uses Scanpy defaults)
+    sc.pp.highly_variable_genes(adata)
+    adata = adata[:, adata.var.highly_variable].copy()
+
+    # 4 Scale and perform PCA
+    sc.pp.scale(adata)
+    sc.tl.pca(adata)
+
+    # 5 Compute the neighbor graph
+    sc.pp.neighbors(adata)
+
+    print("Normalization, log, HVG, PCA, and neighbors completed (default parameters).")
     return adata

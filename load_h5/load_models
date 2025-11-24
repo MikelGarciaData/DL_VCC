@@ -1,0 +1,130 @@
+import os
+import sys
+import torch
+import scanpy as sc
+import numpy as np
+
+from pathlib import Path
+from transformers import AutoTokenizer, AutoModel
+from torch import nn
+from torch.utils.data import DataLoader
+from arcstate import SEModel
+from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+
+# -----------------------------------------------------------
+# Añadir el directorio ROOT al sys.path
+
+current_path = Path(__file__).resolve().parent
+project_root = current_path.parent
+sys.path.append(str(project_root))
+print("project root loaded to syspath:", str(project_root))
+
+# -----------------------------------------------------------
+# Importar las clases desde datasets/ y models/
+# -----------------------------------------------------------
+
+# from DL_VCC.datasets.PairDataset import AnnDataPairDataset
+from PairDataset import AnnDataPairDataset
+# from DL_VCC.models.FlowMatchingNet import FlowMatchingNet
+from FlowMatchingNet import FlowMatchingNet
+
+# -----------------------------------------------------------
+# Cargar AnnData
+# -----------------------------------------------------------
+
+data_folder = (project_root / 'data' / 'adata_Training.h5ad').resolve()
+adata = sc.read_h5ad(data_folder)
+
+print("AnnData cargado:", adata)
+
+# -----------------------------------------------------------
+#  Obtener embeddings del modelo SE de ARC Institute
+# -----------------------------------------------------------
+ckpt_folder = (project_root / 'load_h5' / 'se600m_epoch4.ckpt').resolve()
+model = SEModel.from_pretrained("se600m_epoch4.ckpt").cuda()
+print(model)
+# AutoModel.from_pretrained("arcinstitute/SE-600M", trust_remote_code=True)
+# AutoTokenizer.from_pretrained("arcinstitute/SE-600M", trust_remote_code=True).cuda()
+
+ckpt = torch.load(ckpt_path, map_location="cpu")
+
+def cell_to_text(cell_expr, var_names):
+    parts = []
+    for g, v in zip(var_names, cell_expr):
+        if v > 0:
+            parts.append(f"{g}:{float(v):.3f}")
+    return " ".join(parts)
+
+print("Convirtiendo células a texto…")
+texts = [cell_to_text(c, adata.var_names) for c in adata.X]
+
+tokens = tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to("cuda")
+
+print("Calculando embeddings SE…")
+with torch.no_grad():
+    outputs = model_se(**tokens)
+    embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+
+adata.obsm["SE_emb"] = embeddings
+print("SE embedding shape:", embeddings.shape)
+
+# -----------------------------------------------------------
+# Dataset de Flow Matching basado en AnnData
+# -----------------------------------------------------------
+
+dataset = AnnDataPairDataset(adata, key="obsm:SE_emb")
+loader = DataLoader(dataset, batch_size=64, shuffle=True)
+
+dim = embeddings.shape[1]
+
+# -----------------------------------------------------------
+# Modelo Flow Matching
+# -----------------------------------------------------------
+
+model_fm = FlowMatchingNet(dim).cuda()
+optimizer = torch.optim.AdamW(model_fm.parameters(), lr=1e-4)
+
+scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=100)
+
+# -----------------------------------------------------------
+# Entrenamiento Flow Matching
+# -----------------------------------------------------------
+
+print("Entrenando Flow Matching…")
+
+for epoch in range(3):
+    for x0, x1 in loader:
+        x0 = x0.cuda()
+        x1 = x1.cuda()
+
+        t = torch.rand(x0.shape[0], 1).cuda()
+        x_t = (1 - t) * x0 + t * x1
+
+        target_v = x1 - x0
+        v_pred = model_fm(x_t, t)
+
+        loss = nn.MSELoss()(v_pred, target_v)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    print(f"Epoch {epoch} | Loss {loss.item():.4f}")
+
+# -----------------------------------------------------------
+# Generación de nuevas muestras SE con el FM
+# -----------------------------------------------------------
+
+print("Generando muestras…")
+
+n_samples = 100
+z = torch.randn(n_samples, dim).cuda()
+
+with torch.no_grad():
+    for ti in torch.linspace(1, 0, 200).cuda():
+        t = ti.expand(n_samples, 1)
+        v = model_fm(z, t)
+        z = z - v * 0.01
+
+generated_se = z.cpu().numpy()
+print("Nuevos embeddings SE generados:", generated_se.shape)
