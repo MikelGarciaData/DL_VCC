@@ -48,3 +48,10 @@ for p in chosen_perts:
 adata_sub = adata[cells_keep].copy()
 print("Final subset:", adata_sub)
 print("Total cells:", adata_sub.n_obs)
+
+subset_path = "/data/adata_sub.h5ad"  # change this to your folder
+
+# Save the AnnData object
+adata_sub.write(subset_path)
+
+print(f"Subset saved to {subset_path}")
