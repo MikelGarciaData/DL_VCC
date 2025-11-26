@@ -1,4 +1,14 @@
 # DL_VCC
+
+## Steps for the next week
+
+1. Filter top 2000 most variable genes. DONE
+2. Train a linear model with flow matching
+3. Check scoring for the model
+4. Train a Transformer/Diffusion model with flow matching
+5. Check scoring for the model
+
+
 Deep Learning Virtual Cell Challenge
 
 [Environment Setup](environment.yml)
