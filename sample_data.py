@@ -1,4 +1,7 @@
+import scanpy as sc
+import numpy as np
 
+adata_path = "data/raw_data/adata_Training.h5ad"
 # ============================
 # 1) LOAD THE DATA
 # ============================
