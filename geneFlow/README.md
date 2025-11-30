@@ -1,87 +1,92 @@
-Optimal Transport Conditional Flow Matching (OT-CFM) for Single-Cell Perturbation
+# Optimal Transport Conditional Flow Matching (OT-CFM) for Single-Cell Perturbation
 
-This repository contains a PyTorch implementation of Optimal Transport Conditional Flow Matching (OT-CFM) designed to predict the effects of genetic perturbations on single cells.
+This repository contains a PyTorch implementation of **Optimal Transport Conditional Flow Matching (OT-CFM)** designed to predict the effects of genetic perturbations on single cells.
 
-This model is capable of Zero-Shot Generalization: it can predict the transcriptomic phenotype of a cell after perturbing a gene the model has never seen before, provided it has access to a vector representation of that gene (e.g., from Gene2Vec or an LLM).
+This model is capable of **Zero-Shot Generalization**: it can predict the transcriptomic phenotype of a cell after perturbing a gene the model has *never seen before*, provided it has access to a vector representation of that gene (e.g., from Gene2Vec or an LLM).
 
-1. The Algorithm: What is OT-CFM?
+## 1. The Algorithm: What is OT-CFM?
 
-The Core Concept
+### The Core Concept
 
-Traditional generative models (like GANs or VAEs) try to map noise to data. Flow Matching is different: it learns a continuous Velocity Field (a vector field) that pushes cells from a source distribution (Control/Healthy) to a target distribution (Perturbed/Disease) over a virtual time interval $t \in [0, 1]$.
+Traditional generative models (like GANs or VAEs) try to map noise to data. **Flow Matching** is different: it learns a continuous **Velocity Field** (a vector field) that pushes cells from a source distribution (Control/Healthy) to a target distribution (Perturbed/Disease) over a virtual time interval $t \in [0, 1]$. 
 
-In this code, we use Optimal Transport (OT) flow matching. This assumes the most efficient path between a control cell $x_0$ and a perturbed cell $x_1$ is a straight line.
+In this code, we use **Optimal Transport (OT)** flow matching. This assumes the most efficient path between a control cell $x_0$ and a perturbed cell $x_1$ is a straight line.
 
-The "Flow" in the Code
+### The "Flow" in the Code
 
 Mathematically, the probability path is defined as a linear interpolation:
 
+$$
+x_t = (1 - t)x_0 + t x_1
+$$
 
-$$x_t = (1 - t)x_0 + t x_1$$
+The **velocity** (how $x_t$ changes with time) is simply the derivative with respect to $t$:
 
-The velocity (how $x_t$ changes with time) is simply the derivative with respect to $t$:
+$$
+u_t(x_t) = \frac{d}{dt}x_t = x_1 - x_0
+$$
 
+### The Objective
 
-$$u_t(x_t) = \frac{d}{dt}x_t = x_1 - x_0$$
+The neural network $v_\theta(x_t, t, y)$ tries to predict this velocity. The loss function in `train_ot_cfm.py` minimizes the squared difference between the predicted velocity and the true straight-line direction:
 
-The Objective
+$$
+\mathcal{L} = || v_\theta(x_t, t, gene\_vector) - (x_1 - x_0) ||^2
+$$
 
-The neural network $v_\theta(x_t, t, y)$ tries to predict this velocity. The loss function in train_ot_cfm.py minimizes the squared difference between the predicted velocity and the true straight-line direction:
+## 2. Model Architecture
 
-$$\mathcal{L} = || v_\theta(x_t, t, gene\_vector) - (x_1 - x_0) ||^2$$
+The core model is a **Conditional Transformer**. It does not treat the cell as a sequence of tokens (like text), but rather uses the Transformer blocks for their powerful conditioning mechanisms.
 
-2. Model Architecture
+### Key Components
 
-The core model is a Conditional Transformer. It does not treat the cell as a sequence of tokens (like text), but rather uses the Transformer blocks for their powerful conditioning mechanisms.
-
-Key Components
-
-1. SinusoidalPosEmb
+#### 1. `SinusoidalPosEmb`
 
 Encodes the continuous time scalar $t \in [0, 1]$ into a high-dimensional vector. This allows the network to understand "where" in the flow process the cell currently is (e.g., "we are 50% transformed").
 
-2. AdaLN (Adaptive Layer Normalization)
+#### 2. `AdaLN` (Adaptive Layer Normalization)
 
-This is the conditioning mechanism. Instead of just concatenating the gene vector to the input, we use it to modulate the network layers.
+This is the **conditioning mechanism**. Instead of just concatenating the gene vector to the input, we use it to modulate the network layers.
 
-Input: The Gene Vector (200-dim) + Time Embedding.
+* **Input:** The Gene Vector (200-dim) + Time Embedding.
 
-Action: It predicts scale (gamma) and shift (beta) parameters.
+* **Action:** It predicts `scale` (gamma) and `shift` (beta) parameters.
 
-Result: It effectively "reprograms" the normalization layers of the Transformer based on which gene is being perturbed. This is what allows the model to generalize to new genes.
+* **Result:** It effectively "reprograms" the normalization layers of the Transformer based on which gene is being perturbed. This is what allows the model to generalize to new genes. 
 
-3. VectorTransformer (The Main Class)
+#### 3. `VectorTransformer` (The Main Class)
 
-Input: A cell embedding (e.g., PCA coordinates).
+* **Input:** A cell embedding (e.g., PCA coordinates).
 
-Process: It projects the cell to a hidden dimension, passes it through Transformer blocks modulated by AdaLN, and outputs a vector of the same size as the input.
+* **Process:** It projects the cell to a hidden dimension, passes it through Transformer blocks modulated by AdaLN, and outputs a vector of the same size as the input.
 
-Output: The Velocity Vector. If you add this vector to the current cell state, you move closer to the perturbed state.
+* **Output:** The **Velocity Vector**. If you add this vector to the current cell state, you move closer to the perturbed state.
 
-3. Cross-Validation Strategy
+## 3. Cross-Validation Strategy
 
-Standard random splits are invalid for this task because they would leak gene information. We use Leave-Gene-Group-Out Cross-Validation:
+Standard random splits are invalid for this task because they would leak gene information. We use **Leave-Gene-Group-Out Cross-Validation**:
 
-Group K-Fold: The script identifies all unique perturbation genes (e.g., TP53, KRAS, MYC...).
+1. **Group K-Fold:** The script identifies all unique perturbation genes (e.g., TP53, KRAS, MYC...).
 
-Splitting: It splits these genes into 5 folds.
+2. **Splitting:** It splits these *genes* into 5 folds.
 
-Zero-Shot Test: In Fold 1, the model might train on TP53 and KRAS but is validated on MYC.
+3. **Zero-Shot Test:** In Fold 1, the model might train on TP53 and KRAS but is validated on MYC.
 
-Goal: This proves the model isn't memorizing "Cell A turns into Cell B", but is learning "Gene Vector V causes a transformation in Direction D".
+4. **Goal:** This proves the model isn't memorizing "Cell A turns into Cell B", but is learning "Gene Vector V causes a transformation in Direction D".
 
-4. How to Run on HPC
+## 4. How to Run on HPC
 
-Step 1: Prepare Data
+### Step 1: Prepare Data
 
 You need two files:
 
-data.h5ad: Scanpy object with .obsm['X_pca'] (or X_scvi) and a column target_gene.
+1. **`data.h5ad`**: Scanpy object with `.obsm['X_pca']` (or `X_scvi`) and a column `target_gene`. 
 
-gene_vectors.txt: Text file with format GENE 0.123 0.456 ....
+2. **`gene_vectors.txt`**: Text file with format `GENE 0.123 0.456 ...`.
 
-Step 2: Create Submission Script (run.sh)
+### Step 2: Create Submission Script (`run.sh`)
 
+```bash
 #!/bin/bash
 #SBATCH --job-name=OT-CFM
 #SBATCH --gres=gpu:1           # Request 1 GPU
@@ -103,17 +108,13 @@ python train_ot_cfm.py \
   --hidden_dim 512 \
   --num_layers 8 \
   --num_heads 8
+```
 
-
-Step 3: Submit
-
-sbatch run.sh
-
-
-5. Prediction
+## 5. Prediction
 
 To predict the effect of a gene (e.g., "EGFR") on control cells:
 
+```bash
 python predict_ot_cfm.py \
   --checkpoint "./checkpoints_v1/best_model_fold_0.pt" \
   --config "./checkpoints_v1/config_fold_0.json" \
@@ -125,14 +126,14 @@ python predict_ot_cfm.py \
   --hidden_dim 512 \
   --num_layers 8 \
   --num_heads 8
+```
 
+**Note:** You must use the exact same architecture flags (`hidden_dim`, `num_layers`, `num_heads`) as you did in training.
 
-Note: You must use the exact same architecture flags (hidden_dim, num_layers, num_heads) as you did in training.
+### Predicted Data Format
 
-Predicted Data Format
+The output is a **Numpy Array (`.npy`)** containing the predicted latent embeddings.
 
-The output is a Numpy Array (.npy) containing the predicted latent embeddings.
+* **Shape:** `(500, 50)` (assuming 500 cells and 50 PCA components). 
 
-Shape: (500, 50) (assuming 500 cells and 50 PCA components).
-
-Usage: Load this into Python, creates a new AnnData object, and visualize with UMAP to see how the predicted cells shift away from the controls.
+* **Usage:** Load this into Python, creates a new AnnData object, and visualize with UMAP to see how the predicted cells shift away from the controls.
