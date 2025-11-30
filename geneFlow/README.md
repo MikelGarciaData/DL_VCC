@@ -30,7 +30,7 @@ $$
 
 ### The Objective
 
-The neural network $v_\theta(x_t, t, y)$ tries to predict this velocity. The loss function in `train_ot_cfm.py` minimizes the squared difference between the predicted velocity and the true straight-line direction:
+The neural network $v_\theta(x_t, t, y)$ tries to predict this velocity. The loss function in `train_flow.py` minimizes the squared difference between the predicted velocity and the true straight-line direction:
 
 $$
 \mathcal{L} = || v_\theta(x_t, t, gene\_vector) - (x_1 - x_0) ||^2
@@ -99,7 +99,7 @@ You need two files:
 source activate my_env
 
 # Run Training
-python train_ot_cfm.py \
+python train_flow.py \
   --adata_path "/path/to/your_data.h5ad" \
   --gene_vec_path "/path/to/gene_vectors.txt" \
   --save_dir "./checkpoints_v1" \
@@ -117,7 +117,7 @@ python train_ot_cfm.py \
 To predict the effect of a gene (e.g., "EGFR") on control cells:
 
 ```bash
-python predict_ot_cfm.py \
+python predict_flow.py \
   --checkpoint "./checkpoints_v1/best_model_fold_0.pt" \
   --config "./checkpoints_v1/config_fold_0.json" \
   --gene_vec_path "/path/to/gene_vectors.txt" \
