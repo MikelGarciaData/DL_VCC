@@ -5,6 +5,8 @@ This repository contains a PyTorch implementation of **Optimal Transport Conditi
 This model is capable of **Zero-Shot Generalization**: it can predict the transcriptomic phenotype of a cell after perturbing a gene the model has *never seen before*, provided it has access to a vector representation of that gene (e.g., from Gene2Vec or an LLM).
 
 ## 1. The Algorithm: What is OT-CFM?
+<img width="2178" height="828" alt="image" src="https://github.com/user-attachments/assets/387fe811-81cb-4a8f-9e62-059e15e822f1" />
+
 
 ### The Core Concept
 
