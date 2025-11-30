@@ -40,7 +40,7 @@ loader = torch.utils.data.DataLoader(dataset, batch_size=1024, shuffle=True)
 model = FlowMatchingNet(dim=2000)
 optim = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-for epoch in range(2):
+for epoch in range(200):
     for xt, t, vt in loader:
         # xt, t, vt = xt.cuda(), t.cuda(), vt.cuda()
 
