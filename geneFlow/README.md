@@ -64,7 +64,7 @@ This is the **conditioning mechanism**. Instead of just concatenating the gene v
 
 * **Output:** The **Velocity Vector**. If you add this vector to the current cell state, you move closer to the perturbed state.
 
-## 3. Cross-Validation Strategy
+## 3.0 Cross-Validation Strategy
 
 Standard random splits are invalid for this task because they would leak gene information. We use **Leave-Gene-Group-Out Cross-Validation**:
 
@@ -75,6 +75,17 @@ Standard random splits are invalid for this task because they would leak gene in
 3. **Zero-Shot Test:** In Fold 1, the model might train on TP53 and KRAS but is validated on MYC.
 
 4. **Goal:** This proves the model isn't memorizing "Cell A turns into Cell B", but is learning "Gene Vector V causes a transformation in Direction D".
+
+## 3.1 Training Strategy (Simple Split)
+
+We use a **Train/Validation Split** strategy to ensure the model generalizes to unseen genes without the computational cost of K-Fold Cross-Validation.
+
+1. **Gene Splitting:** The script identifies all unique perturbation genes (e.g., TP53, KRAS, MYC...). It randomly sets aside 10% of these genes as a **Validation Set**.
+
+2. **Zero-Shot Validation:** During training, the model **never sees** cells perturbed by the validation genes. Every 50 epochs, we pause and ask the model to predict the velocity for these unseen genes.
+
+3. **Checkpointing:** We save the model weights (`best_model.pt`) only when the validation loss improves. This prevents overfitting and ensures the final model is the one that generalized best.
+
 
 ## 4. How to Run on HPC
 
@@ -121,6 +132,20 @@ python predict_flow.py \
   --checkpoint "./checkpoints_v1/best_model_fold_0.pt" \
   --config "./checkpoints_v1/config_fold_0.json" \
   --gene_vec_path "/path/to/gene_vectors.txt" \
+  --adata_path "/path/to/your_data.h5ad" \
+  --target_gene "EGFR" \
+  --num_cells 500 \
+  --output_path "prediction_EGFR.npy" \
+  --hidden_dim 512 \
+  --num_layers 8 \
+  --num_heads 8
+```
+
+```bash
+python predict_ot_cfm.py \
+  --checkpoint "./checkpoints_simple/best_model.pt" \
+  --config "./checkpoints_simple/config.json" \
+  --gene_vec_path "esm2_gene_vectors_small.txt" \
   --adata_path "/path/to/your_data.h5ad" \
   --target_gene "EGFR" \
   --num_cells 500 \
