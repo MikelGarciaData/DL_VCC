@@ -14,8 +14,8 @@ from sklearn.model_selection import train_test_split
 # ==========================================
 
 class SinusoidalPosEmb(nn.Module):
-    def _init_(self, dim):
-        super()._init_()
+    def __init__(self, dim):
+        super().__init__()
         self.dim = dim
 
     def forward(self, x):
@@ -28,8 +28,8 @@ class SinusoidalPosEmb(nn.Module):
         return emb
 
 class AdaLN(nn.Module):
-    def _init_(self, dim, cond_dim):
-        super()._init_()
+    def __init__(self, dim, cond_dim):
+        super().__init__()
         self.norm = nn.LayerNorm(dim, elementwise_affine=False)
         self.proj = nn.Sequential(
             nn.SiLU(),
@@ -44,8 +44,8 @@ class AdaLN(nn.Module):
         return self.norm(x) * (1 + scale) + shift
 
 class TransformerBlock(nn.Module):
-    def _init_(self, dim, num_heads, cond_dim, mlp_ratio=4):
-        super()._init_()
+    def __init__(self, dim, num_heads, cond_dim, mlp_ratio=4):
+        super().__init__()
         self.attn_norm = AdaLN(dim, cond_dim)
         self.attn = nn.MultiheadAttention(dim, num_heads, batch_first=True)
         self.mlp_norm = AdaLN(dim, cond_dim)
@@ -64,8 +64,8 @@ class TransformerBlock(nn.Module):
         return x
 
 class VectorTransformer(nn.Module):
-    def _init_(self, input_dim, cond_vec_dim, hidden_dim=256, num_layers=6, num_heads=4):
-        super()._init_()
+    def __init__(self, input_dim, cond_vec_dim, hidden_dim=256, num_layers=6, num_heads=4):
+        super().__init__()
         self.input_proj = nn.Linear(input_dim, hidden_dim)
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(hidden_dim),
@@ -132,7 +132,7 @@ def load_gene_vectors(file_path):
 # ==========================================
 
 class FlowMatchingEngine:
-    def _init_(self, model, device):
+    def __init__(self, model, device):
         self.model = model
         self.device = device
         self.optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -285,5 +285,5 @@ def main():
         
     print("\nTraining Complete. Best model saved as 'best_model.pt'")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
