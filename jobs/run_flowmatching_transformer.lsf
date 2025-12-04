@@ -1,0 +1,36 @@
+#!/bin/sh
+### General options
+#BSUB -q gpul40s             # queue from the DTU guide
+#BSUB -J se600m_embedding    # job name
+#BSUB -n 4                   # number of cores
+#BSUB -R "span[hosts=1]"     # all cores on one node
+#BSUB -R "rusage[mem=64GB]"  # request 64 GB RAM total
+#BSUB -M 64GB                # kill job if >64 GB is used
+#BSUB -W 00:00               # walltime (24 hours)
+#BSUB -o logs/se600m_%J.out  # stdout
+#BSUB -e logs/se600m_%J.err  # stderr
+
+nvidia-smi
+# Load the cuda module
+module load cuda/11.6
+# change to project dir
+cd /dtu/blackhole/02/224002/DL_VCC/geneFlow
+
+# load modules if you need them (example)
+# module load cuda/xx.x  python/3.x  ...
+
+source .venv/bin/activate
+
+# the python command to execute the flow matching model
+python train_S_flow.py \
+    --adata_path ../data/adata_Training_SE.h5ad \
+    --gene_vec_path ../geneFlow/gene2vec.txt \
+    --save_dir ../geneFlow/my_model_output \
+    --emb_key X_state \
+    --gene_col target_gene \
+    --control_label non-targeting \
+    --epochs 1000 \
+    --batch_size 256 \
+    --hidden_dim 256 \
+    --num_layers 6 \
+    --num_heads 4

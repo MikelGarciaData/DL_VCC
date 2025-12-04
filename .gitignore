@@ -2,3 +2,4 @@ data/
 *.DS_Store
 .github/instructions/
 EDA/eda_diffusionmodel/tmp_input.h5ad
+.venv/
