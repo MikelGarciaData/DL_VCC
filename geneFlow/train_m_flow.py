@@ -222,6 +222,7 @@ def main():
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
+    parser.add_argument("--pred_steps", type=int, default=20, help="Number of Euler integration steps")
 
     args = parser.parse_args()
     
@@ -380,7 +381,7 @@ def main():
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
         # 4. Run ODE Solver (Euler)
-        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, steps=20)
+        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, pred_steps=args.steps)
         
         # 5. Store
         predicted_embs.append(pred_cells.cpu().numpy())
