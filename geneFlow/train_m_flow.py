@@ -91,9 +91,14 @@ class VectorFlowNet(nn.Module):
         # 3. Gene Vector Projection
         self.gene_vec_proj = nn.Linear(cond_vec_dim, hidden_dim)
         
-        # 4. The Backbone (Stack of ResBlocks)
+        # --- CALCULATION FOR NEW COND DIMENSION ---
+        # We will concatenate Time (hidden_dim) and Gene (hidden_dim)
+        combined_cond_dim = hidden_dim * 2
+
+        # 4. The Backbone
         self.blocks = nn.ModuleList([
-            ResBlock(hidden_dim, cond_dim=hidden_dim)
+            # Pass the combined dimension to the blocks
+            ResBlock(hidden_dim, cond_dim=combined_cond_dim)
             for _ in range(num_layers)
         ])
         
@@ -107,11 +112,12 @@ class VectorFlowNet(nn.Module):
         t: (batch, 1) -> Time [0,1]
         y_vec: (batch, cond_vec_dim) -> Gene Embedding
         """
-        t_emb = self.time_mlp(t.squeeze(-1))
-        y_emb = self.gene_vec_proj(y_vec)
+        t_emb = self.time_mlp(t.squeeze(-1))   # (batch, hidden_dim)
+        y_emb = self.gene_vec_proj(y_vec)      # (batch, hidden_dim)
         
-        # Combine conditions (Additive)
-        cond = t_emb + y_emb
+        # --- MODIFIED: CONCATENATION ---
+        # Concatenate along the feature dimension (dim=-1)
+        cond = torch.cat([t_emb, y_emb], dim=-1) # (batch, 2 * hidden_dim)
         
         h = self.input_proj(x)
         for block in self.blocks:
@@ -245,12 +251,12 @@ def main():
     parser.add_argument("--adata_path", type=str, required=True, help="Path to .h5ad file")
     parser.add_argument("--gene_vec_path", type=str, required=True, help="Path to gene embeddings (txt/vec)")
     parser.add_argument("--save_dir", type=str, default="./checkpoints")
-    parser.add_argument("--emb_key", type=str, default="X_pca", help="Key in adata.obsm")
+    parser.add_argument("--emb_key", type=str, default="X_scvi", help="Key in adata.obsm")
     parser.add_argument("--gene_col", type=str, default="target_gene", help="Key in adata.obs for gene names")
     parser.add_argument("--control_label", type=str, default="non-targeting", help="Label for control cells")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--val_split", type=float, default=0.1)
+    parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
 
