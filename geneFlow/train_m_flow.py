@@ -9,6 +9,7 @@ import json
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
+from collections import Counter 
 
 # ==========================================
 # 1. Neural Network Architecture (ResNet-MLP)
@@ -249,16 +250,17 @@ class FlowMatchingEngine:
 def main():
     parser = argparse.ArgumentParser(description="Train OT-CFM (ResNet-MLP)")
     parser.add_argument("--adata_path", type=str, required=True, help="Path to .h5ad file")
-    parser.add_argument("--gene_vec_path", type=str, required=True, help="Path to gene embeddings (txt/vec)")
+    parser.add_argument("--gene_vec_path", type=str, required=True, help="Path to gene embeddings")
     parser.add_argument("--save_dir", type=str, default="./checkpoints")
     parser.add_argument("--emb_key", type=str, default="X_scvi", help="Key in adata.obsm")
-    parser.add_argument("--gene_col", type=str, default="target_gene", help="Key in adata.obs for gene names")
+    parser.add_argument("--gene_col", type=str, default="target_gene", help="Key in adata.obs")
     parser.add_argument("--control_label", type=str, default="non-targeting", help="Label for control cells")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
+    # Removed --pred_sample_size because we now use the real data counts
 
     args = parser.parse_args()
     
@@ -276,31 +278,26 @@ def main():
 
     X_emb = adata.obsm[args.emb_key]
     target_genes = adata.obs[args.gene_col].values.astype(str)
+    
+    # --- NEW: Count cells per gene ---
+    gene_counts = Counter(target_genes)
+    
     input_dim = X_emb.shape[1]
-    print(f"Detected Cell Embedding Dimension: {input_dim}")
-
+    
     # 2. Load Gene Vectors
     gene_map, cond_vec_dim = load_gene_vectors(args.gene_vec_path)
-    if cond_vec_dim is None:
-        print("Failed to load gene vectors.")
-        return
+    if cond_vec_dim is None: return
 
     # 3. Filter Valid Genes
     available_genes = set(gene_map.keys())
     data_genes = set(np.unique(target_genes))
-    # Intersection of genes in data and genes in vector file, excluding control
     valid_pert_genes = list((available_genes & data_genes) - {args.control_label})
-    print(f"Found {len(valid_pert_genes)} valid perturbation genes.")
-
-    if len(valid_pert_genes) == 0:
-        print("No valid genes found. Check column names and gene vector file.")
-        return
-
+    
     # 4. Prepare Tensors
     print("Preparing tensors...")
     ctrl_mask = (target_genes == args.control_label)
     x_control_all = torch.tensor(X_emb[ctrl_mask], dtype=torch.float32)
-    print(f"Number of control cells: {len(x_control_all)}")
+    print(f"Total control cells available: {len(x_control_all)}")
     
     pert_dict_all = {}
     for g in valid_pert_genes:
@@ -310,7 +307,6 @@ def main():
 
     # 5. Split and Create Datasets
     train_genes, val_genes = train_test_split(valid_pert_genes, test_size=args.val_split, random_state=42)
-    print(f"Train genes: {len(train_genes)} | Val genes: {len(val_genes)}")
     
     train_ds = SingleCellPairDataset(x_control_all, pert_dict_all, gene_map, train_genes)
     val_ds = SingleCellPairDataset(x_control_all, pert_dict_all, gene_map, val_genes)
@@ -328,10 +324,8 @@ def main():
     
     engine = FlowMatchingEngine(model, device)
     
-    best_val_loss = float('inf')
-    # 1. Define Early Stopping parameters
-    patience = 10         # Stop if no improvement for 10 epochs
-    counter = 0           # Tracks how many bad epochs in a row
+    patience = 10
+    counter = 0
     best_val_loss = float('inf')
 
     # 7. Training Loop
@@ -345,12 +339,10 @@ def main():
         
         for x0, x1, y_vec in pbar:
             x0, x1, y_vec = x0.to(device), x1.to(device), y_vec.to(device)
-            
             engine.optimizer.zero_grad()
             loss = engine.compute_loss(x0, x1, y_vec)
             loss.backward()
             engine.optimizer.step()
-            
             train_loss_sum += loss.item()
             batches += 1
             pbar.set_postfix({'Loss': f"{loss.item():.4f}"})
@@ -371,32 +363,75 @@ def main():
         avg_val_loss = val_loss_sum / val_batches if val_batches > 0 else 0
         print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.5f} | Val Loss: {avg_val_loss:.5f}")
 
-        # Check for improvement
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), f"{args.save_dir}/best_model.pt")
-            counter = 0  # Reset counter because we improved!
+            counter = 0
             print("  -> New best model saved.")
         else:
-            counter += 1 # No improvement, increment counter
+            counter += 1
             print(f"  -> No improvement. Patience: {counter}/{patience}")
-            
-            # 3. Stop if patience is exceeded
             if counter >= patience:
                 print("\nEarly stopping triggered!")
                 break
+
+    # ==========================================
+    # 8. PREDICTION PHASE (Modified)
+    # ==========================================
+    print("\n==========================================")
+    print("Starting Prediction on Validation Genes...")
     
-    # Save Config
-    config = {
-        'input_dim': input_dim,
-        'cond_vec_dim': cond_vec_dim,
-        'train_genes': train_genes,
-        'val_genes': val_genes
-    }
-    with open(f"{args.save_dir}/config.json", 'w') as f:
-        json.dump(config, f)
+    model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt"))
+    model.eval()
+    
+    predicted_embs = []
+    predicted_genes = []
+    
+    print(f"Simulating {len(val_genes)} genes using cell counts from original data...")
+    
+    # We use random sampling with replacement from the control pool
+    # This ensures we can generate N cells even if N > len(control_pool)
+    n_total_ctrl = len(x_control_all)
+
+    for gene in tqdm(val_genes, desc="Predicting Genes"):
+        if gene not in gene_map: continue
         
-    print("\nTraining Complete. Best model saved.")
+        # 1. Determine how many cells this gene had in real data
+        n_required = gene_counts[gene]
+        if n_required == 0: continue # Should not happen given filtering, but safety first
+        
+        # 2. Sample that many control cells
+        # torch.randint does sampling WITH replacement
+        indices = torch.randint(0, n_total_ctrl, (n_required,))
+        x_curr = x_control_all[indices].to(device)
+        
+        # 3. Get gene vector
+        g_vec = gene_map[gene].to(device)
+        g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
+        
+        # 4. Run ODE Solver
+        # Note: If n_required is very large (>5000), you might want to batch this part
+        # to avoid GPU OOM, but for standard scRNA-seq it's usually fine.
+        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, steps=20)
+        
+        # 5. Store
+        predicted_embs.append(pred_cells.cpu().numpy())
+        predicted_genes.extend([gene] * n_required)
+        
+    if len(predicted_embs) > 0:
+        full_pred_matrix = np.concatenate(predicted_embs, axis=0)
+        
+        print("Creating AnnData object...")
+        adata_pred = sc.AnnData(X=full_pred_matrix)
+        adata_pred.obs['condition'] = predicted_genes
+        adata_pred.obs['type'] = 'predicted'
+        
+        save_path = os.path.join(args.save_dir, "validation_predictions.h5ad")
+        adata_pred.write(save_path)
+        print(f"Predictions saved to: {save_path}")
+        print(f"Shape: {adata_pred.shape}")
+    else:
+        print("No predictions generated.")
 
 if __name__ == "__main__":
     main()
