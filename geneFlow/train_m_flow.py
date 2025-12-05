@@ -437,7 +437,7 @@ def main():
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
         # 2. Run Solver (Returns dict: {0.0: tensor, 0.25: tensor...})
-        snapshots = ode_solve_trajectory(model, x_curr, g_vec_batch, steps=args.steps)
+        snapshots = ode_solve_trajectory(model, x_curr, g_vec_batch, steps=args.pred_steps)
         
         # 3. Sort data into the correct buckets
         for t in time_points:
