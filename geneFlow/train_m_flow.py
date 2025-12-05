@@ -30,10 +30,6 @@ class SinusoidalPosEmb(nn.Module):
         return emb
 
 class AdaLN(nn.Module):
-    """
-    Adaptive Layer Normalization.
-    Modulates the layer norm statistics based on the condition (time + gene).
-    """
     def __init__(self, dim, cond_dim):
         super().__init__()
         self.norm = nn.LayerNorm(dim, elementwise_affine=False)
@@ -78,7 +74,6 @@ class VectorFlowNet(nn.Module):
         )
         self.gene_vec_proj = nn.Linear(cond_vec_dim, hidden_dim)
         
-        # Concatenating Time embedding + Gene embedding
         combined_cond_dim = hidden_dim * 2
 
         self.blocks = nn.ModuleList([
@@ -179,7 +174,6 @@ class SingleCellPairDataset(Dataset):
     def __getitem__(self, idx):
         x1 = self.pert_cells[idx]
         y_vec = self.pert_conds[idx]
-        # Independent Coupling: Pair with random control cell
         rand_idx = torch.randint(0, len(self.x_control), (1,)).item()
         x0 = self.x_control[rand_idx]
         return x0, x1, y_vec
@@ -194,14 +188,8 @@ class FlowMatchingEngine:
     def compute_loss(self, x_control, x_pert, gene_vecs):
         batch_size = x_control.shape[0]
         t = torch.rand(batch_size, 1, device=self.device)
-        
-        # OT Path: Linear Interpolation
         x_t = (1 - t) * x_control + t * x_pert
-        
-        # Target Velocity: Difference vector
         u_target = x_pert - x_control
-        
-        # Predict Velocity
         u_pred = self.model(x_t, t, gene_vecs)
         return self.criterion(u_pred, u_target)
 
@@ -222,7 +210,7 @@ def main():
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
-    parser.add_argument("--pred_steps", type=int, default=20, help="Number of Euler integration steps")
+    parser.add_argument("--pred_steps", type=int, default=20, help="Number of ODE solver steps for prediction")
 
     args = parser.parse_args()
     
@@ -240,10 +228,7 @@ def main():
 
     X_emb = adata.obsm[args.emb_key]
     target_genes = adata.obs[args.gene_col].values.astype(str)
-    
-    # Count cells per gene for prediction later
     gene_counts = Counter(target_genes)
-    
     input_dim = X_emb.shape[1]
     
     # 2. Load Gene Vectors
@@ -289,6 +274,12 @@ def main():
     patience = 10
     counter = 0
     best_val_loss = float('inf')
+    
+    # --- NEW: History Dictionary ---
+    loss_history = {
+        'train_loss': [],
+        'val_loss': []
+    }
 
     # 7. Training Loop
     print("\nStarting Training...")
@@ -323,9 +314,13 @@ def main():
                 val_batches += 1
         
         avg_val_loss = val_loss_sum / val_batches if val_batches > 0 else 0
+        
+        # --- NEW: Record History ---
+        loss_history['train_loss'].append(avg_train_loss)
+        loss_history['val_loss'].append(avg_val_loss)
+        
         print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.5f} | Val Loss: {avg_val_loss:.5f}")
 
-        # Early Stopping Logic
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), f"{args.save_dir}/best_model.pt")
@@ -338,7 +333,7 @@ def main():
                 print("\nEarly stopping triggered!")
                 break
     
-    # 8. Save Configuration
+    # 8. Save Configuration & History
     config = {
         'input_dim': int(input_dim),
         'cond_vec_dim': int(cond_vec_dim),
@@ -347,7 +342,12 @@ def main():
     }
     with open(f"{args.save_dir}/config.json", 'w') as f:
         json.dump(config, f, indent=4)
-    print("Configuration and splits saved.")
+        
+    # --- NEW: Save History ---
+    with open(f"{args.save_dir}/loss_history.json", 'w') as f:
+        json.dump(loss_history, f, indent=4)
+        
+    print("Configuration and loss history saved.")
 
     # ==========================================
     # 9. PREDICTION PHASE
@@ -355,7 +355,6 @@ def main():
     print("\n==========================================")
     print("Starting Prediction on Validation Genes...")
     
-    # Reload best model
     model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt"))
     model.eval()
     
@@ -364,26 +363,24 @@ def main():
     n_total_ctrl = len(x_control_all)
     
     print(f"Simulating {len(val_genes)} genes using real cell counts...")
+    print(f"ODE Solver Steps: {args.pred_steps}")
 
     for gene in tqdm(val_genes, desc="Predicting Genes"):
         if gene not in gene_map: continue
         
-        # 1. Determine cell count from real data
         n_required = gene_counts[gene]
         if n_required == 0: continue
         
-        # 2. Sample control cells (With Replacement)
+        # Sample with replacement
         indices = torch.randint(0, n_total_ctrl, (n_required,))
         x_curr = x_control_all[indices].to(device)
         
-        # 3. Get gene vector
         g_vec = gene_map[gene].to(device)
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
-        # 4. Run ODE Solver (Euler)
-        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, pred_steps=args.steps)
+        # Use args.steps here
+        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, steps=args.pred_steps)
         
-        # 5. Store
         predicted_embs.append(pred_cells.cpu().numpy())
         predicted_genes.extend([gene] * n_required)
         
