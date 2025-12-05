@@ -140,22 +140,41 @@ def load_gene_vectors(file_path):
     return gene_map, detected_dim
 
 @torch.no_grad()
-def ode_solve_euler(model, x_control, gene_vec, steps=20):
+def ode_solve_trajectory(model, x_control, gene_vec, steps=20):
     """
-    Integrates the ODE from t=0 to t=1 using Euler method.
+    Integrates from t=0 to t=1, saving snapshots at t=0, 0.25, 0.5, 0.75, 1.0.
     """
+    # Ensure steps is a multiple of 4 so we hit exact quarter points
+    if steps % 4 != 0:
+        steps = ((steps // 4) + 1) * 4
+    
     dt = 1.0 / steps
     x_t = x_control.clone()
     batch_size = x_control.shape[0]
     device = x_control.device
 
+    # We want snapshots at these exact time fractions
+    save_points = {0.0, 0.25, 0.5, 0.75, 1.0}
+    snapshots = {0.0: x_t.clone()} # Save t=0
+
     for i in range(steps):
         t_val = i / steps
         t = torch.full((batch_size, 1), t_val, device=device)
+        
         velocity = model(x_t, t, gene_vec)
         x_t = x_t + velocity * dt
         
-    return x_t
+        # Calculate the time at the NEXT step
+        next_t = (i + 1) / steps
+        
+        # If the next step is one of our target points, save it
+        # (Using a small epsilon for float comparison safety)
+        if any(abs(next_t - target) < 1e-6 for target in save_points):
+            # Round the key to nice float (e.g. 0.25)
+            clean_time = round(next_t, 2)
+            snapshots[clean_time] = x_t.clone()
+            
+    return snapshots
 
 class SingleCellPairDataset(Dataset):
     def __init__(self, x_control, pert_dict, gene_map, active_genes):
@@ -224,8 +243,8 @@ def main():
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
-    parser.add_argument("--pred_steps", type=int, default=20, help="Number of ODE solver steps for prediction")
     parser.add_argument("--seed", type=int, default=42, help="Base random seed for the experiment")
+    parser.add_argument("--pred_steps", type=int, default=20, help="Number of ODE solver steps for prediction should be divisible by 4")
 
     args = parser.parse_args()
 
@@ -386,55 +405,71 @@ def main():
     print("Configuration and loss history saved.")
 
     # ==========================================
-    # 9. PREDICTION PHASE
+    # 9. PREDICTION PHASE (5 Separate Files)
     # ==========================================
     print("\n==========================================")
-    print("Starting Prediction on Validation Genes...")
+    print("Starting Trajectory Prediction (Saving 5 separate files)...")
     
     model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt", map_location=device))
     model.eval()
     
-    predicted_embs = []
-    predicted_genes = []
-    n_total_ctrl = len(x_control_all)
+    # Define the time points we want to save
+    time_points = [0.0, 0.25, 0.5, 0.75, 1.0]
     
-    print(f"Simulating {len(val_genes)} genes using real cell counts...")
-    print(f"ODE Solver Steps: {args.pred_steps}")
+    # Create a dictionary to hold lists for EACH time point separately
+    # Structure: { 0.0: {'embs': [], 'genes': []}, 0.25: {...}, ... }
+    data_by_time = {t: {'embs': [], 'genes': []} for t in time_points}
+    
+    print(f"Simulating {len(val_genes)} genes...")
 
-    for gene in tqdm(val_genes, desc="Predicting Genes"):
-        if gene not in gene_map:
-            continue
+    for gene in tqdm(val_genes, desc="Predicting Trajectories"):
+        if gene not in gene_map: continue
         
         n_required = gene_counts[gene]
         if n_required == 0:
             continue
         
-        # Sample with replacement (seeded via global RNG)
-        indices = torch.randint(0, n_total_ctrl, (n_required,))
+        # 1. Prepare Inputs
+        indices = torch.randint(0, len(x_control_all), (n_required,))
         x_curr = x_control_all[indices].to(device)
         
         g_vec = gene_map[gene].to(device)
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
-        pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, steps=args.pred_steps)
+        # 2. Run Solver (Returns dict: {0.0: tensor, 0.25: tensor...})
+        snapshots = ode_solve_trajectory(model, x_curr, g_vec_batch, steps=args.steps)
         
-        predicted_embs.append(pred_cells.cpu().numpy())
-        predicted_genes.extend([gene] * n_required)
+        # 3. Sort data into the correct buckets
+        for t in time_points:
+            if t in snapshots:
+                # Store the embedding
+                data_by_time[t]['embs'].append(snapshots[t].cpu().numpy())
+                # Store the gene label
+                data_by_time[t]['genes'].extend([gene] * n_required)
+
+    # 4. Save 5 separate files
+    print("\nSaving files...")
+    for t in time_points:
+        container = data_by_time[t]
         
-    if len(predicted_embs) > 0:
-        full_pred_matrix = np.concatenate(predicted_embs, axis=0)
-        
-        print("Creating AnnData object...")
-        adata_pred = sc.AnnData(X=full_pred_matrix)
-        adata_pred.obs['condition'] = predicted_genes
-        adata_pred.obs['type'] = 'predicted'
-        
-        save_path = os.path.join(args.save_dir, "validation_predictions.h5ad")
-        adata_pred.write(save_path)
-        print(f"Predictions saved to: {save_path}")
-        print(f"Shape: {adata_pred.shape}")
-    else:
-        print("No predictions generated.")
+        if len(container['embs']) > 0:
+            # Concatenate all genes for this specific time point
+            X_full = np.concatenate(container['embs'], axis=0)
+            
+            # Create AnnData
+            adata_t = sc.AnnData(X=X_full)
+            adata_t.obs['condition'] = container['genes']
+            adata_t.obs['type'] = 'predicted'
+            adata_t.obs['time_point'] = t  # Metadata tag
+            
+            # Format filename (e.g., predictions_t_0.25.h5ad)
+            fname = f"predictions_t_{t:.2f}.h5ad"
+            save_path = os.path.join(args.save_dir, fname)
+            
+            adata_t.write(save_path)
+            print(f"Saved: {save_path} | Shape: {adata_t.shape}")
+        else:
+            print(f"Warning: No data found for t={t}")
 
 if __name__ == "__main__":
     main()
