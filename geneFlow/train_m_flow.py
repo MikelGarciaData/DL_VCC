@@ -329,6 +329,10 @@ def main():
     engine = FlowMatchingEngine(model, device)
     
     best_val_loss = float('inf')
+    # 1. Define Early Stopping parameters
+    patience = 10         # Stop if no improvement for 10 epochs
+    counter = 0           # Tracks how many bad epochs in a row
+    best_val_loss = float('inf')
 
     # 7. Training Loop
     print("\nStarting Training...")
@@ -366,11 +370,22 @@ def main():
         
         avg_val_loss = val_loss_sum / val_batches if val_batches > 0 else 0
         print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.5f} | Val Loss: {avg_val_loss:.5f}")
-        
+
+        # Check for improvement
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), f"{args.save_dir}/best_model.pt")
-
+            counter = 0  # Reset counter because we improved!
+            print("  -> New best model saved.")
+        else:
+            counter += 1 # No improvement, increment counter
+            print(f"  -> No improvement. Patience: {counter}/{patience}")
+            
+            # 3. Stop if patience is exceeded
+            if counter >= patience:
+                print("\nEarly stopping triggered!")
+                break
+    
     # Save Config
     config = {
         'input_dim': input_dim,
