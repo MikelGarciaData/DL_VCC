@@ -81,7 +81,7 @@ class VectorFlowNet(nn.Module):
             for _ in range(num_layers)
         ])
         
-        self.final_norm = AdaLN(hidden_dim, hidden_dim)
+        self.final_norm = AdaLN(hidden_dim, combined_cond_dim)
         self.head = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, y_vec):
