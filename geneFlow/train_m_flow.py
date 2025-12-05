@@ -9,10 +9,10 @@ import json
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
-from collections import Counter 
+from collections import Counter
 
 # ==========================================
-# 1. Neural Network Architecture (ResNet-MLP)
+# 1. Neural Network Architecture
 # ==========================================
 
 class SinusoidalPosEmb(nn.Module):
@@ -41,25 +41,18 @@ class AdaLN(nn.Module):
             nn.SiLU(),
             nn.Linear(cond_dim, dim * 2) 
         )
-        # Initialize scaling parameters to zero for stability
         nn.init.zeros_(self.proj[1].weight)
         nn.init.zeros_(self.proj[1].bias)
 
     def forward(self, x, cond):
-        # cond -> [scale, shift]
         scale_shift = self.proj(cond)
         scale, shift = scale_shift.chunk(2, dim=-1)
         return self.norm(x) * (1 + scale) + shift
 
 class ResBlock(nn.Module):
-    """
-    A simple Residual Block with Adaptive Normalization.
-    Structure: x -> AdaLN -> SiLU -> Linear -> SiLU -> Linear -> + x
-    """
     def __init__(self, dim, cond_dim, dropout=0.0):
         super().__init__()
         self.cond_norm = AdaLN(dim, cond_dim)
-        
         self.mlp = nn.Sequential(
             nn.SiLU(),
             nn.Linear(dim, dim),
@@ -70,65 +63,45 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, x, cond):
-        # Pre-Norm architecture
         x_norm = self.cond_norm(x, cond)
         return x + self.mlp(x_norm)
 
 class VectorFlowNet(nn.Module):
     def __init__(self, input_dim, cond_vec_dim, hidden_dim=256, num_layers=6):
         super().__init__()
-        
-        # 1. Input Projection
         self.input_proj = nn.Linear(input_dim, hidden_dim)
-        
-        # 2. Time Embedding (Sinusoidal)
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
-        
-        # 3. Gene Vector Projection
         self.gene_vec_proj = nn.Linear(cond_vec_dim, hidden_dim)
         
-        # --- CALCULATION FOR NEW COND DIMENSION ---
-        # We will concatenate Time (hidden_dim) and Gene (hidden_dim)
+        # Concatenating Time embedding + Gene embedding
         combined_cond_dim = hidden_dim * 2
 
-        # 4. The Backbone
         self.blocks = nn.ModuleList([
-            # Pass the combined dimension to the blocks
             ResBlock(hidden_dim, cond_dim=combined_cond_dim)
             for _ in range(num_layers)
         ])
         
-        # 5. Output Head
         self.final_norm = AdaLN(hidden_dim, hidden_dim)
         self.head = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, x, t, y_vec):
-        """
-        x: (batch, input_dim) -> Cell Embedding
-        t: (batch, 1) -> Time [0,1]
-        y_vec: (batch, cond_vec_dim) -> Gene Embedding
-        """
-        t_emb = self.time_mlp(t.squeeze(-1))   # (batch, hidden_dim)
-        y_emb = self.gene_vec_proj(y_vec)      # (batch, hidden_dim)
-        
-        # --- MODIFIED: CONCATENATION ---
-        # Concatenate along the feature dimension (dim=-1)
-        cond = torch.cat([t_emb, y_emb], dim=-1) # (batch, 2 * hidden_dim)
+        t_emb = self.time_mlp(t.squeeze(-1))
+        y_emb = self.gene_vec_proj(y_vec)
+        cond = torch.cat([t_emb, y_emb], dim=-1)
         
         h = self.input_proj(x)
         for block in self.blocks:
             h = block(h, cond)
         h = self.final_norm(h, cond)
-        
         return self.head(h)
 
 # ==========================================
-# 2. Data Loading Helpers
+# 2. Helpers: Loading, Solving, Dataset
 # ==========================================
 
 def load_gene_vectors(file_path):
@@ -137,58 +110,58 @@ def load_gene_vectors(file_path):
     detected_dim = None
 
     with open(file_path, 'r') as f:
-        # Check header
         first_line = f.readline().strip().split()
         if len(first_line) == 2 and first_line[0].isdigit():
-            pass # It was a header
+            pass 
         else:
             f.seek(0)
 
         for line in f:
             parts = line.strip().split()
             if len(parts) < 2: continue
-            
             gene = parts[0].upper()
             try:
                 vec = np.array(parts[1:], dtype=np.float32)
                 if detected_dim is None:
                     detected_dim = len(vec)
-                    print(f"Detected gene vector dimension: {detected_dim}")
-                
                 if len(vec) == detected_dim:
                     gene_map[gene] = torch.tensor(vec)
             except ValueError:
                 continue
-                
     print(f"Loaded {len(gene_map)} gene vectors.")
     return gene_map, detected_dim
 
+@torch.no_grad()
+def ode_solve_euler(model, x_control, gene_vec, steps=20):
+    """
+    Integrates the ODE from t=0 to t=1 using Euler method.
+    """
+    dt = 1.0 / steps
+    x_t = x_control.clone()
+    batch_size = x_control.shape[0]
+    device = x_control.device
+
+    for i in range(steps):
+        t_val = i / steps
+        t = torch.full((batch_size, 1), t_val, device=device)
+        velocity = model(x_t, t, gene_vec)
+        x_t = x_t + velocity * dt
+        
+    return x_t
 
 class SingleCellPairDataset(Dataset):
     def __init__(self, x_control, pert_dict, gene_map, active_genes):
-        """
-        x_control: Tensor of all control cells (N_ctrl, dim)
-        pert_dict: Dict {gene_name: Tensor(N_cells, dim)}
-        gene_map: Dict {gene_name: Tensor(vec_dim)}
-        active_genes: List of genes to include in this dataset
-        """
         self.x_control = x_control
-        
-        # Flatten the perturbation data for easy indexing
         self.pert_cells = []
         self.pert_conds = []
         
         print(f"Preparing dataset for {len(active_genes)} genes...")
         for gene in active_genes:
             if gene not in pert_dict: continue
-            
             cells = pert_dict[gene]
             vec = gene_map[gene]
             
-            # Add cells
             self.pert_cells.append(cells)
-            
-            # Repeat gene vector for N cells
             n_cells = cells.shape[0]
             conds = vec.unsqueeze(0).repeat(n_cells, 1) 
             self.pert_conds.append(conds)
@@ -197,7 +170,6 @@ class SingleCellPairDataset(Dataset):
             self.pert_cells = torch.cat(self.pert_cells, dim=0)
             self.pert_conds = torch.cat(self.pert_conds, dim=0)
         else:
-            print("Warning: No cells found for the provided genes.")
             self.pert_cells = torch.empty(0)
             self.pert_conds = torch.empty(0)
 
@@ -205,21 +177,12 @@ class SingleCellPairDataset(Dataset):
         return self.pert_cells.shape[0]
 
     def __getitem__(self, idx):
-        # 1. Target (Perturbed Cell)
         x1 = self.pert_cells[idx]
-        
-        # 2. Condition (Gene Vector)
         y_vec = self.pert_conds[idx]
-        
-        # 3. Source (Random Control Cell) - Independent Coupling
+        # Independent Coupling: Pair with random control cell
         rand_idx = torch.randint(0, len(self.x_control), (1,)).item()
         x0 = self.x_control[rand_idx]
-        
         return x0, x1, y_vec
-
-# ==========================================
-# 3. Training Engine
-# ==========================================
 
 class FlowMatchingEngine:
     def __init__(self, model, device, lr=1e-4):
@@ -240,11 +203,10 @@ class FlowMatchingEngine:
         
         # Predict Velocity
         u_pred = self.model(x_t, t, gene_vecs)
-        
         return self.criterion(u_pred, u_target)
 
 # ==========================================
-# 4. Main Execution
+# 3. Main Execution
 # ==========================================
 
 def main():
@@ -260,7 +222,6 @@ def main():
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
-    # Removed --pred_sample_size because we now use the real data counts
 
     args = parser.parse_args()
     
@@ -279,7 +240,7 @@ def main():
     X_emb = adata.obsm[args.emb_key]
     target_genes = adata.obs[args.gene_col].values.astype(str)
     
-    # --- NEW: Count cells per gene ---
+    # Count cells per gene for prediction later
     gene_counts = Counter(target_genes)
     
     input_dim = X_emb.shape[1]
@@ -363,6 +324,7 @@ def main():
         avg_val_loss = val_loss_sum / val_batches if val_batches > 0 else 0
         print(f"Epoch {epoch+1}: Train Loss: {avg_train_loss:.5f} | Val Loss: {avg_val_loss:.5f}")
 
+        # Early Stopping Logic
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             torch.save(model.state_dict(), f"{args.save_dir}/best_model.pt")
@@ -374,34 +336,42 @@ def main():
             if counter >= patience:
                 print("\nEarly stopping triggered!")
                 break
+    
+    # 8. Save Configuration
+    config = {
+        'input_dim': int(input_dim),
+        'cond_vec_dim': int(cond_vec_dim),
+        'train_genes': train_genes,
+        'val_genes': val_genes
+    }
+    with open(f"{args.save_dir}/config.json", 'w') as f:
+        json.dump(config, f, indent=4)
+    print("Configuration and splits saved.")
 
     # ==========================================
-    # 8. PREDICTION PHASE (Modified)
+    # 9. PREDICTION PHASE
     # ==========================================
     print("\n==========================================")
     print("Starting Prediction on Validation Genes...")
     
+    # Reload best model
     model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt"))
     model.eval()
     
     predicted_embs = []
     predicted_genes = []
-    
-    print(f"Simulating {len(val_genes)} genes using cell counts from original data...")
-    
-    # We use random sampling with replacement from the control pool
-    # This ensures we can generate N cells even if N > len(control_pool)
     n_total_ctrl = len(x_control_all)
+    
+    print(f"Simulating {len(val_genes)} genes using real cell counts...")
 
     for gene in tqdm(val_genes, desc="Predicting Genes"):
         if gene not in gene_map: continue
         
-        # 1. Determine how many cells this gene had in real data
+        # 1. Determine cell count from real data
         n_required = gene_counts[gene]
-        if n_required == 0: continue # Should not happen given filtering, but safety first
+        if n_required == 0: continue
         
-        # 2. Sample that many control cells
-        # torch.randint does sampling WITH replacement
+        # 2. Sample control cells (With Replacement)
         indices = torch.randint(0, n_total_ctrl, (n_required,))
         x_curr = x_control_all[indices].to(device)
         
@@ -409,9 +379,7 @@ def main():
         g_vec = gene_map[gene].to(device)
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
-        # 4. Run ODE Solver
-        # Note: If n_required is very large (>5000), you might want to batch this part
-        # to avoid GPU OOM, but for standard scRNA-seq it's usually fine.
+        # 4. Run ODE Solver (Euler)
         pred_cells = ode_solve_euler(model, x_curr, g_vec_batch, steps=20)
         
         # 5. Store
