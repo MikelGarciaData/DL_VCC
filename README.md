@@ -1,14 +1,15 @@
-# geneFlow
+# GeneFlow: Conditional Flow Matching for Single-Cell Perturbation
 
 ## Jupyter Notebook to run the model: [geneFlow.ipynb](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb)
 
+This repository **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
 
-# GeneFlow: Conditional Flow Matching for Single-Cell Perturbation
-
-This repository contains the PyTorch implementation of **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
 
 GeneFlow aims for **Zero-Shot Generalization**: predicting the transcriptomic phenotype of a cell after perturbing a gene the model has *never seen before*, provided it has access to a vector representation of that gene (e.g., from GenePT).
 
+<img width="427" height="315" alt="Screenshot 2025-12-07 at 22 15 14" src="https://github.com/user-attachments/assets/f7ab6f60-ebb8-4644-be66-075011d8fe5c" />
+
+The white are the control cells and C1 C2 are the perturbed states. We want to predict the perturbed states.
 ## 1. The Algorithm
 
 GeneFlow uses the ideas of **Flow Matching**. It learns a continuous **Velocity Field** that pushes cells directly from a source distribution (Control) to a target distribution (Perturbed) along a straight-line path.
@@ -50,7 +51,27 @@ You need two files:
 
 ### Step 2: Execution (Training & Prediction)
 
-The script handles both training and the subsequent trajectory generation in one go.
+`train_m_flow.py` **Arguments**
+
+
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--adata_path` | str | Required | Path to the input `.h5ad` file containing the single-cell data. |
+| `--gene_vec_path` | str | Required | Path to the file containing gene embeddings. |
+| `--save_dir` | str | `./checkpoints` | Directory where model checkpoints, configuration, loss history, and predictions will be saved. |
+| `--emb_key` | str | `X_scvi` | Key in `adata.obsm` that contains the embeddings to be used as input. |
+| `--gene_col` | str | `target_gene` | Column in `adata.obs` specifying the gene associated with each cell. |
+| `--control_label` | str | `non-targeting` | Label identifying control cells in `adata.obs[gene_col]`. |
+| `--epochs` | int | `50` | Number of training epochs. |
+| `--batch_size` | int | `128` | Number of samples per training batch. |
+| `--val_split` | float | `0.2` | Fraction of perturbed genes to use for validation. |
+| `--hidden_dim` | int | `128` | Hidden dimension size for the neural network. |
+| `--num_layers` | int | `6` | Number of residual blocks in the VectorFlowNet model. |
+| `--seed` | int | `42` | Random seed for reproducibility. |
+| `--pred_steps` | int | `20` | Number of ODE solver steps during trajectory prediction (should be divisible by 4). |
+
+---
 
 ```bash
 python main.py \
@@ -66,50 +87,5 @@ python main.py \
   --num_layers 6 \
   --pred_steps 20
 ```
-
-Deep Learning Virtual Cell Challenge
-
-[Environment Setup](environment.yml)
-
-raw data should be put here:
-[raw data](data/raw_data/)
-
-a viewer for the h5 file can be found here:
-[viewer](https://myhdf5.hdfgroup.org/)
-
-We are gonna use the cell embedding model from the STATE paper (named SE model) to embed the gene counts data into a latent space. The model can be found here:
-https://huggingface.co/arcinstitute/SE-600M
-
-Then we will use flow matching diffusion model for training. It will train on the embedded data and will train to predict how the cell state changes, from control cells (target_gene = "non-targeting") to pertubed state (the genes with a target gene)
-
-<img alt="image" src="https://github.com/user-attachments/assets/363caaf8-58b2-4ffa-9a05-e2d0fbeaa545" />
-
-
-<img alt="image" src="https://github.com/user-attachments/assets/b4f967fb-9cfa-41f8-8755-ba0b36cb508b" />
-
-The white are the control cells and C1 C2 are the perturbed states.
-
-Once we get the pertubed state in the latent space we will decode it back the gene counts. And then run benchmarks studies. The model will be trained on 150 pertubations roughly 145,000 cells have them. One cell has one genetic pertubation. And we 38,000 control cells with no pertubation.
-
-<img alt="cee75766-089d-40b9-922b-ce853601472e" src="https://github.com/user-attachments/assets/4d9c2e08-977d-4244-b4d4-b38069980ce5" />
-
-We can see that the control cells have a similar gene expression (the blob in the middle) but also most of the genetic pertubations have very low effect on the over all gene expression. There are some that have higher effect, they are in the outside clusters.
-
-Once the flow model learns to change the state of the cell, we will validate it with new data that wasn't in the training set. New pertubations, same cell type.
-
-Learning stuff: 
-
-[what diffusion models are](https://youtu.be/iv-5mZ_9CPY?si=yb6IEbxzJG7K6-al)
-
-
-[flow matching 1](https://youtu.be/7cMzfkWFWhI?si=trWp7UBoSivH-uwf)
-
-[flow matching 2](https://www.youtube.com/watch?v=7NNxK3CqaDk)
-
-
-[Flow matching for single cell data (Marginal flow matching - maybe use this model)](https://youtu.be/I6zCSrs60eA?si=8xoLRO9o8wIlpBDg)
-
-You can read more about the SE model in this paper: 
-https://github.com/MikelGarciaData/DL_VCC/blob/main/docs/state_paper.pdf
 
 
