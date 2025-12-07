@@ -3,6 +3,70 @@
 ## Jupyter Notebook to run the model: [geneFlow.ipynb](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb)
 
 
+# GeneFlow: Conditional Flow Matching for Single-Cell Perturbation
+
+This repository contains the PyTorch implementation of **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
+
+GeneFlow aims for **Zero-Shot Generalization**: predicting the transcriptomic phenotype of a cell after perturbing a gene the model has *never seen before*, provided it has access to a vector representation of that gene (e.g., from GenePT).
+
+## 1. The Algorithm
+
+GeneFlow uses the ideas of **Flow Matching**. It learns a continuous **Velocity Field** that pushes cells directly from a source distribution (Control) to a target distribution (Perturbed) along a straight-line path.
+
+### Training Procedure
+
+The model minimizes the difference between the predicted velocity and the true direction between control and perturbed states.
+
+<img width="568" height="634" alt="Screenshot 2025-12-07 at 21 54 54" src="https://github.com/user-attachments/assets/76295b9b-6ca6-4d9e-870b-199da7f1418f" />
+
+## 2. Model Architecture
+
+The core model (`VectorFlowNet`) is a **Conditional ResNet** that conditions the entire network on the specific gene perturbation being applied.
+
+### Key Components
+
+1.  **`SinusoidalPosEmb`**: Encodes the continuous time scalar $t \in [0, 1]$ into a high-dimensional vector. This tells the network "where" in the interpolation process the cell currently is.
+2.  **`AdaLN` (Adaptive Layer Normalization)**: This is the critical conditioning mechanism. Instead of simply concatenating the gene vector, `AdaLN` uses the gene embedding $y$ to predict the `scale` (gamma) and `shift` (beta) parameters of the normalization layers.
+    * *Effect:* This effectively "reprograms" the network's behavior based on *which* gene is being perturbed, allowing generalization to unseen gene vectors.
+3.  **`ResBlock`**: Standard residual blocks (MLP + Nonlinearity + Dropout) that process the cell state while being modulated by the `AdaLN` layers.
+
+## 3. Training Strategy (Zero-Shot)
+
+To ensure the model isn't just memorizing data, we use a **Leave-Gene-Out** strategy:
+
+1.  **Gene Splitting:** The script identifies all unique perturbation genes. It randomly sets aside a percentage (e.g., 20%) as a **Validation Set**.
+2.  **Separation:** During training, the model **never sees** cells perturbed by the validation genes.
+3.  **Checkpointing:** The model weights (`best_model.pt`) are saved only when the loss on these *unseen* genes improves.
+
+## 4. How to Run
+
+### Step 1: Prepare Data
+You need two files:
+1.  **`data.h5ad`**: A Scanpy object containing your single-cell data.
+    * `.obsm['X_scvi']`: Latent embeddings of the cells (or PCA).
+    * `.obs['target_gene']`: Column indicating the perturbed gene (use 'non-targeting' for controls).
+2.  **`gene_vectors.txt`**: A text file mapping gene names to vectors.
+    * Format: `GENE_NAME 0.123 0.456 ...`
+
+### Step 2: Execution (Training & Prediction)
+
+The script handles both training and the subsequent trajectory generation in one go.
+
+```bash
+python main.py \
+  --adata_path "./data/perturbation_data.h5ad" \
+  --gene_vec_path "./data/gene_vectors.txt" \
+  --save_dir "./checkpoints_geneflow" \
+  --emb_key "X_scvi" \
+  --control_label "non-targeting" \
+  --gene_col "target_gene" \
+  --epochs 100 \
+  --batch_size 128 \
+  --hidden_dim 256 \
+  --num_layers 6 \
+  --pred_steps 20
+```
+
 Deep Learning Virtual Cell Challenge
 
 [Environment Setup](environment.yml)
