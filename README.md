@@ -4,7 +4,7 @@
 
 ## Main file for GeneFlow model: [train_m_flow.py](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow/train_m_flow.py)
 
-This repository **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
+This repository of **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
 
 The working and theory behind the model can be found here: [GeneFlow Paper](https://github.com/MikelGarciaData/DL_VCC/blob/main/Deep_Learning_project.pdf)
 
