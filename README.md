@@ -1,6 +1,6 @@
-# DL_VCC
+# geneFlow
 
-## Jupyter Notebook to run the model: [notebook](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb)
+## Jupyter Notebook to run the model: [geneFlow](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb)
 
 
 Deep Learning Virtual Cell Challenge
