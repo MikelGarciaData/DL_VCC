@@ -50,6 +50,6 @@ We ploted the trajectory of the predictions:
 
 We can see that **SMARCA5** forms a cluster seperate from the other perturbations. Most of the perturbations don't change the cell state by much hence they are clustered together. Also it must have been difficult for our model to learn the perturbations of new genes as there we only 119 genes in the training set and there might have not been similar genes. But it managed to push the cells perturbed with **SMARCA5** towards a similar state. There must have been a gene similar to SMARCA5 in the training set, and the model learnt its effects.
 
-In the future we will train a decoder that can decode the latent space to get the real gene expressions of the cells. This will allow us the evaluate our model rigorously for true biological predictions. 
+In the future we will train a decoder that can decode the latent space to get the real gene expressions of the cells. This will allow us to evaluate our model rigorously for true biological predictions. 
 
 
