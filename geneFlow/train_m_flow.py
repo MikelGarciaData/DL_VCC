@@ -10,6 +10,18 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from collections import Counter
+import random
+
+# ==========================================
+# 0. Seeding
+# ==========================================
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 # ==========================================
 # 1. Neural Network Architecture
@@ -113,7 +125,8 @@ def load_gene_vectors(file_path):
 
         for line in f:
             parts = line.strip().split()
-            if len(parts) < 2: continue
+            if len(parts) < 2:
+                continue
             gene = parts[0].upper()
             try:
                 vec = np.array(parts[1:], dtype=np.float32)
@@ -171,7 +184,8 @@ class SingleCellPairDataset(Dataset):
         
         print(f"Preparing dataset for {len(active_genes)} genes...")
         for gene in active_genes:
-            if gene not in pert_dict: continue
+            if gene not in pert_dict:
+                continue
             cells = pert_dict[gene]
             vec = gene_map[gene]
             
@@ -229,9 +243,13 @@ def main():
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=6)
+    parser.add_argument("--seed", type=int, default=42, help="Base random seed for the experiment")
     parser.add_argument("--pred_steps", type=int, default=20, help="Number of ODE solver steps for prediction should be divisible by 4")
 
     args = parser.parse_args()
+
+    # Set global seeds
+    set_seed(args.seed)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Running on device: {device}")
@@ -252,7 +270,8 @@ def main():
     
     # 2. Load Gene Vectors
     gene_map, cond_vec_dim = load_gene_vectors(args.gene_vec_path)
-    if cond_vec_dim is None: return
+    if cond_vec_dim is None:
+        return
 
     # 3. Filter Valid Genes
     available_genes = set(gene_map.keys())
@@ -271,14 +290,33 @@ def main():
         if np.sum(mask) > 0:
             pert_dict_all[g] = torch.tensor(X_emb[mask], dtype=torch.float32)
 
-    # 5. Split and Create Datasets
-    train_genes, val_genes = train_test_split(valid_pert_genes, test_size=args.val_split, random_state=42)
+    # 5. Split and Create Datasets (seeded)
+    train_genes, val_genes = train_test_split(
+        valid_pert_genes,
+        test_size=args.val_split,
+        random_state=args.seed
+    )
     
     train_ds = SingleCellPairDataset(x_control_all, pert_dict_all, gene_map, train_genes)
     val_ds = SingleCellPairDataset(x_control_all, pert_dict_all, gene_map, val_genes)
+
+    # Seeded generator for DataLoader shuffle
+    g = torch.Generator()
+    g.manual_seed(args.seed)
     
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,
+        generator=g,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=0,
+    )
 
     # 6. Initialize Model
     model = VectorFlowNet(
@@ -294,7 +332,6 @@ def main():
     counter = 0
     best_val_loss = float('inf')
     
-    # --- NEW: History Dictionary ---
     loss_history = {
         'train_loss': [],
         'val_loss': []
@@ -334,7 +371,6 @@ def main():
         
         avg_val_loss = val_loss_sum / val_batches if val_batches > 0 else 0
         
-        # --- NEW: Record History ---
         loss_history['train_loss'].append(avg_train_loss)
         loss_history['val_loss'].append(avg_val_loss)
         
@@ -357,12 +393,12 @@ def main():
         'input_dim': int(input_dim),
         'cond_vec_dim': int(cond_vec_dim),
         'train_genes': train_genes,
-        'val_genes': val_genes
+        'val_genes': val_genes,
+        'seed': args.seed,
     }
     with open(f"{args.save_dir}/config.json", 'w') as f:
         json.dump(config, f, indent=4)
         
-    # --- NEW: Save History ---
     with open(f"{args.save_dir}/loss_history.json", 'w') as f:
         json.dump(loss_history, f, indent=4)
         
@@ -374,7 +410,7 @@ def main():
     print("\n==========================================")
     print("Starting Trajectory Prediction (Saving 5 separate files)...")
     
-    model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt"))
+    model.load_state_dict(torch.load(f"{args.save_dir}/best_model.pt", map_location=device))
     model.eval()
     
     # Define the time points we want to save
@@ -390,7 +426,8 @@ def main():
         if gene not in gene_map: continue
         
         n_required = gene_counts[gene]
-        if n_required == 0: continue
+        if n_required == 0:
+            continue
         
         # 1. Prepare Inputs
         indices = torch.randint(0, len(x_control_all), (n_required,))
@@ -400,7 +437,7 @@ def main():
         g_vec_batch = g_vec.unsqueeze(0).repeat(n_required, 1)
         
         # 2. Run Solver (Returns dict: {0.0: tensor, 0.25: tensor...})
-        snapshots = ode_solve_trajectory(model, x_curr, g_vec_batch, steps=args.steps)
+        snapshots = ode_solve_trajectory(model, x_curr, g_vec_batch, steps=args.pred_steps)
         
         # 3. Sort data into the correct buckets
         for t in time_points:
