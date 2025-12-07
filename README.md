@@ -1,6 +1,8 @@
 # GeneFlow: Conditional Flow Matching for Single-Cell Perturbation
 
-## Jupyter Notebook to run and understand the model: [geneFlow.ipynb](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb)
+## Jupyter Notebook to run and understand the model: [geneFlow.ipynb](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow.ipynb).
+
+## Main file for GeneFlow model: [train_m_flow.py](https://github.com/MikelGarciaData/DL_VCC/blob/main/geneFlow/train_m_flow.py).
 
 This repository **GeneFlow**, a generative model designed to predict the effects of genetic perturbations on single cells.
 
