@@ -40,53 +40,16 @@ To ensure the model isn't just memorizing data, we use a **Leave-Gene-Out** stra
 2.  **Separation:** During training, the model **never sees** cells perturbed by the validation genes.
 3.  **Checkpointing:** The model weights (`best_model.pt`) are saved only when the loss on these *unseen* genes improves.
 
-## 4. How to Run
+## Predictions:
 
-### Step 1: Prepare Data
-You need two files:
-1.  **`data.h5ad`**: A Scanpy object containing your single-cell data.
-    * `.obsm['X_scvi']`: Latent embeddings of the cells (or PCA).
-    * `.obs['target_gene']`: Column indicating the perturbed gene (use 'non-targeting' for controls).
-2.  **`gene_vectors.txt`**: A text file mapping gene names to vectors.
-    * Format: `GENE_NAME 0.123 0.456 ...`
+For predictions we picked up random control cells, and predicted the effects of the genes from the validation set on those control cells.
 
-### Step 2: Execution (Training & Prediction)
+We ploted the trajectory of the predictions:
 
-`train_m_flow.py` **Arguments**
+<img width="7471" height="1466" alt="trajectory_scanpy_umap_256" src="https://github.com/user-attachments/assets/8c26284a-aecc-463e-9109-e20d80e9d524" />
 
+We can see that **SMARCA5** forms a cluster seperate from the other perturbations. Most of the perturbations don't change the cell state by much hence they are clustered together. Also it must have been difficult for our model to learn the perturbations of new genes as there we only 119 genes in the training set and there might have not been similar genes. But it managed to push the cells perturbed with **SMARCA5** towards a similar state. There must have been a gene similar to SMARCA5 in the training set, and the model learnt its effects.
 
-
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `--adata_path` | str | Required | Path to the input `.h5ad` file containing the single-cell data. |
-| `--gene_vec_path` | str | Required | Path to the file containing gene embeddings. |
-| `--save_dir` | str | `./checkpoints` | Directory where model checkpoints, configuration, loss history, and predictions will be saved. |
-| `--emb_key` | str | `X_scvi` | Key in `adata.obsm` that contains the embeddings to be used as input. |
-| `--gene_col` | str | `target_gene` | Column in `adata.obs` specifying the gene associated with each cell. |
-| `--control_label` | str | `non-targeting` | Label identifying control cells in `adata.obs[gene_col]`. |
-| `--epochs` | int | `50` | Number of training epochs. |
-| `--batch_size` | int | `128` | Number of samples per training batch. |
-| `--val_split` | float | `0.2` | Fraction of perturbed genes to use for validation. |
-| `--hidden_dim` | int | `128` | Hidden dimension size for the neural network. |
-| `--num_layers` | int | `6` | Number of residual blocks in the VectorFlowNet model. |
-| `--seed` | int | `42` | Random seed for reproducibility. |
-| `--pred_steps` | int | `20` | Number of ODE solver steps during trajectory prediction (should be divisible by 4). |
-
----
-
-```bash
-python main.py \
-  --adata_path "./data/perturbation_data.h5ad" \
-  --gene_vec_path "./data/gene_vectors.txt" \
-  --save_dir "./checkpoints_geneflow" \
-  --emb_key "X_scvi" \
-  --control_label "non-targeting" \
-  --gene_col "target_gene" \
-  --epochs 100 \
-  --batch_size 128 \
-  --hidden_dim 256 \
-  --num_layers 6 \
-  --pred_steps 20
-```
+In the future we will train a decoder that can decode the latent space to get the real gene expressions of the cells. This will allow us the evaluate our model rigorously for true biological predictions. 
 
 
